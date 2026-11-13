@@ -17,12 +17,12 @@ contract P2PEscrow is ReentrancyGuard, Ownable {
     // stages in order, never backward, except via dispute resolution
     // or cancellation before payment is claimed.
     enum OrderStatus {
-        None,     
-        Funded,     
-        PaymentClaimed, 
+        None,
+        Funded,
+        PaymentClaimed,
         Released,
-        Disputed,  
-        Cancelled  
+        Disputed,
+        Cancelled
     }
 
     struct Order {
@@ -52,17 +52,26 @@ contract P2PEscrow is ReentrancyGuard, Ownable {
         require(amount > 0, "amount is zero");
         require(buyer != address(0) && buyer != msg.sender, "invalid buyer");
 
+        // The token address is chosen by the seller. A fee-on-transfer token delivers less than
+        // `amount`, so recording `amount` would make the contract owe tokens it does not hold.
+        // Measure what actually arrived and record that instead.
+        // The transfer comes first on purpose because we need the measured amount.
+        // nonReentrant covers this function and every other function that moves tokens.
+        uint256 balanceBefore = IERC20(token).balanceOf(address(this));
+        IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
+        uint256 received = IERC20(token).balanceOf(address(this)) - balanceBefore;
+        require(received > 0, "nothing received");
+
         orderId = nextOrderId++;
         orders[orderId] = Order({
             seller: msg.sender,
             buyer: buyer,
             token: token,
-            amount: amount,
+            amount: received,
             status: OrderStatus.Funded
         });
 
-        IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
-        emit OrderCreated(orderId, msg.sender, buyer, amount);
+        emit OrderCreated(orderId, msg.sender, buyer, received);
     }
 
     // Buyer marks that they've sent the fiat off-chain. This is purely
